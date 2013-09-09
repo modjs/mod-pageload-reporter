@@ -1,0 +1,14 @@
+// A sample Modfile
+// More info at https://github.com/modulejs/modjs/
+
+module.exports = {
+    plugins: {
+        "mod-pageload-reporter": "../index.js"
+    },
+    tasks: {
+        "mod-pageload-reporter": {
+            src: "",
+            dest: ""
+        }
+    }
+};

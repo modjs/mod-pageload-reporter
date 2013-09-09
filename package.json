@@ -1,0 +1,36 @@
+{
+    "name": "mod-pageload-reporter",
+    "description": "Page Loading Reporter",
+    "version": "0.1.0",
+    "homepage": "https://github.com/modjs/mod-pageload-reporter",
+    "author": {
+        "name": "yuanyan",
+        "url": "https://github.com/yuanyan"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git://github.com/modjs/mod-pageload-reporter.git"
+    },
+    "bugs": {
+        "url": "https://github.com/modjs/mod-pageload-reporter/issues"
+    },
+    "licenses": [
+        {
+            "type": "MIT",
+            "url": "https://github.com/modjs/mod-pageload-reporter/blob/master/MIT-LICENSE.txt"
+        }
+    ],
+    "bin": "",
+    "engines": {
+        "node": ">= 0.6.0"
+    },
+    "scripts": {
+        "test": ""
+    },
+    "dependencies": {
+        "mod-phantomjs": "*"
+    },
+    "devDependencies": {
+    },
+    "keywords": []
+}
