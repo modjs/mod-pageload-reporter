@@ -1,42 +1,139 @@
 var fs = require('fs');
 var WebPage = require('webpage');
 
+phantom.onError = function(msg, trace) {
+    var msgStack = ['PHANTOM ERROR: ' + msg];
+    if (trace && trace.length) {
+        msgStack.push('TRACE:');
+        trace.forEach(function(t) {
+            msgStack.push(' -> ' + (t.file || t.sourceURL) + ': ' + t.line + (t.function ? ' (in function ' + t.function + ')' : ''));
+        });
+    }
+    console.error(msgStack.join('\n'));
+    phantom.exit(1);
+};
+
+function processArgs(config, contract) {
+    var a = 0;
+    var ok = true;
+
+    contract.forEach(function(argument) {
+        if (a < phantom.args.length) {
+            config[argument.name] = phantom.args[a];
+        } else {
+            if (argument.req) {
+                console.log('"' + argument.name + '" argument is required. This ' + argument.desc + '.');
+                ok = false;
+            } else {
+                config[argument.name] = argument.def;
+            }
+        }
+        if (argument.oneof && argument.oneof.indexOf(config[argument.name])==-1) {
+            console.log('"' + argument.name + '" argument must be one of: ' + argument.oneof.join(', '));
+            ok = false;
+        }
+        a++;
+    });
+    return ok;
+}
+
+function mergeConfig(config, configFile) {
+    if (!fs.exists(configFile)) {
+        configFile = "config.json";
+    }
+    var result = JSON.parse(fs.read(configFile)),
+        key;
+    for (key in config) {
+        result[key] = config[key];
+    }
+    return result;
+}
+
+function truncate(str, length) {
+    length = length || 80;
+    if (str.length <= length) {
+        return str;
+    }
+    var half = length / 2;
+    return str.substr(0, half-2) + '...' + str.substr(str.length-half+1);
+}
+
+function pad(str, length) {
+    var padded = str.toString();
+    if (padded.length > length) {
+        return pad(padded, length * 2);
+    }
+    return repeat(' ', length - padded.length) + padded;
+}
+
+function repeat(chr, length) {
+    for (var str = '', l = 0; l < length; l++) {
+        str += chr;
+    }
+    return str;
+}
+
+function clone(obj) {
+    var target = {};
+    for (var i in obj) {
+        if (obj.hasOwnProperty(i)) {
+            target[i] = obj[i];
+        }
+    }
+    return target;
+}
+
+function timerStart() {
+    return (new Date()).getTime();
+}
+
+function timerEnd(start) {
+    return ((new Date()).getTime() - start);
+}
+
 var loadreport = {
 
     run: function () {
         var cliConfig = {};
-        loadreport.performancecache = this.clone(loadreport.performance);
-        if (!this.processArgs(cliConfig, [
+        loadreport.performancecache = clone(loadreport.performance);
+        if (!processArgs(cliConfig, [
             {
                 name: 'url',
                 def: 'http://google.com',
                 req: true,
                 desc: 'the URL of the site to load test'
-            }, {
+            }, 
+            {
                 name: 'task',
                 def: 'performance',
                 req: false,
                 desc: 'the task to perform',
                 oneof: ['performance', 'performancecache', 'filmstrip']
-            }, {
+            },
+            {
                 name: 'configFile',
                 def: 'config.json',
                 req: false,
                 desc: 'a local configuration file of further loadreport settings'
+            },
+            {
+                name: 'intervalTime',
+                def: 50,
+                req: false,
+                desc: 'interval time of the screenshot',
             }
         ])) {
-            //phantom.exit();
-            return;
+            return phantom.exit();
         }
-        this.config = this.mergeConfig(cliConfig, cliConfig.configFile);
+        this.config = mergeConfig(cliConfig, cliConfig.configFile);
         var task = this[this.config.task];
+        // console.log(JSON.stringify(this.config))
         this.load(this.config, task, this);
     },
 
     performance: {
         resources: [],
-        count1 : 100,
-        count2 : 1,
+        planTime : 0,
         timer : 0,
         evalConsole : {},
         evalConsoleErrors : [],
@@ -204,7 +301,7 @@ var loadreport = {
 
 
             //console.log(JSON.stringify(report));
-            console.log('Elapsed load time: ' + this.pad(elapsed, 6) + 'ms');
+            console.log('Elapsed load time: ' + pad(elapsed, 6) + 'ms');
 
             if(phantom.args.indexOf('csv') >= 0){
                 this.printToFile(config,report,'loadreport','csv',phantom.args.indexOf('wipe') >= 0);
@@ -225,22 +322,27 @@ var loadreport = {
 
     filmstrip: {
         onInitialized: function(page, config) {
+            // console.log("onInitialized")
             this.screenshot(new Date().getTime(),page);
         },
         onLoadStarted: function (page, config) {
+            // console.log("onLoadStarted")
             if (!this.performance.start) {
                 this.performance.start = new Date().getTime();
             }
             this.screenshot(new Date().getTime(),page);
         },
         onResourceRequested: function (page, config, request) {
+            // console.log("onResourceRequested")
             this.screenshot(new Date().getTime(),page);
         },
         onResourceReceived: function (page, config, response) {
+            // console.log("onResourceReceived")
             this.screenshot(new Date().getTime(),page);
         },
 
         onLoadFinished: function (page, config, status) {
+            // console.log("onLoadFinished")
             this.screenshot(new Date().getTime(),page);
         }
     },
@@ -270,14 +372,29 @@ var loadreport = {
     load: function (config, task, scope) {
         var page = WebPage.create(),
             pagetemp = WebPage.create(),
-            event;
+            event;    
 
+        if (config.viewportSize) {
+            var size = config.viewportSize
+            page.viewportSize = size;
+            page.clipRect = { left: 0, top: 0, width: size.width, height: size.height };
+        }
+        
+        if (config.cookie){
+            page.addCookie(config.cookie);
+        }
+        
+        if (config.customHeaders) {
+            page.customHeaders = config.customHeaders;
+        }
+        
         if (config.userAgent && config.userAgent != "default") {
             if (config.userAgentAliases[config.userAgent]) {
                 config.userAgent = config.userAgentAliases[config.userAgent];
             }
             page.settings.userAgent = config.userAgent;
         }
+        
         ['onInitialized', 'onLoadStarted', 'onResourceRequested', 'onResourceReceived']
             .forEach(function (event) {
             if (task[event]) {
@@ -316,8 +433,8 @@ var loadreport = {
         }
         page.settings.localToRemoteUrlAccessEnabled = true;
         page.settings.webSecurityEnabled = false;
-        page.onConsoleMessage = function (msg) {
-            console.log(msg)
+        page.onConsoleMessage = function (msg, lineNum, sourceId) {
+            console.log('CONSOLE: ' + msg);
             if (msg.indexOf('jserror-') >= 0){
                 loadreport.performance.evalConsoleErrors.push(msg.substring('jserror-'.length,msg.length));
             }else{
@@ -335,21 +452,28 @@ var loadreport = {
         };
 
         page.onError = function (msg, trace) {
-            //console.log("+++++  " + msg);
+            var msgStack = ['ERROR: ' + msg];
+            if (trace && trace.length) {
+                msgStack.push('TRACE:');
+                trace.forEach(function(t) {
+                    msgStack.push(' -> ' + t.file + ': ' + t.line + (t.function ? ' (in function "' + t.function + '")' : ''));
+                });
+            }
+            console.error(msgStack.join('\n'));
+            
             trace.forEach(function(item) {
                 loadreport.performance.evalConsoleErrors.push(msg + ':' + item.file + ':' + item.line);
             })
         };
 
         function doPageLoad(){
-            setTimeout(function(){page.open(config.url);},config.cacheWait);
+            setTimeout(function(){page.open(config.url);}, config.cacheWait);
         }
 
         if(config.task == 'performancecache'){
-
             pagetemp.open(config.url,function(status) {
                 if (status === 'success') {
-                    pagetemp.release();
+                    pagetemp.close();
                     doPageLoad();
                 }
             });
@@ -358,94 +482,13 @@ var loadreport = {
         }
     },
 
-    processArgs: function (config, contract) {
-        var a = 0;
-        var ok = true;
-
-        contract.forEach(function(argument) {
-            if (a < phantom.args.length) {
-                config[argument.name] = phantom.args[a];
-            } else {
-                if (argument.req) {
-                    console.log('"' + argument.name + '" argument is required. This ' + argument.desc + '.');
-                    ok = false;
-                } else {
-                    config[argument.name] = argument.def;
-                }
-            }
-            if (argument.oneof && argument.oneof.indexOf(config[argument.name])==-1) {
-                console.log('"' + argument.name + '" argument must be one of: ' + argument.oneof.join(', '));
-                ok = false;
-            }
-            a++;
-        });
-        return ok;
-    },
-
-    mergeConfig: function (config, configFile) {
-        if (!fs.exists(configFile)) {
-            configFile = "loadreport/config.json";
-        }
-        if (!fs.exists(configFile)) {
-            configFile = "config.json";
-        }
-        var result = JSON.parse(fs.read(configFile)),
-            key;
-        for (key in config) {
-            result[key] = config[key];
-        }
-        return result;
-    },
-
-    truncate: function (str, length) {
-        length = length || 80;
-        if (str.length <= length) {
-            return str;
-        }
-        var half = length / 2;
-        return str.substr(0, half-2) + '...' + str.substr(str.length-half+1);
-    },
-
-    pad: function (str, length) {
-        var padded = str.toString();
-        if (padded.length > length) {
-            return this.pad(padded, length * 2);
-        }
-        return this.repeat(' ', length - padded.length) + padded;
-    },
-
-    repeat: function (chr, length) {
-        for (var str = '', l = 0; l < length; l++) {
-            str += chr;
-        }
-        return str;
-    },
-
-    clone: function(obj) {
-        var target = {};
-        for (var i in obj) {
-            if (obj.hasOwnProperty(i)) {
-                target[i] = obj[i];
-            }
-        }
-        return target;
-    },
-
-    timerStart: function () {
-        return (new Date()).getTime();
-    },
-
-    timerEnd: function (start) {
-        return ((new Date()).getTime() - start);
-    },
-
     /*worker: function(now,page){
         var currentTime = now - this.performance.start;
         var ths = this;
 
 
         if((currentTime) >= this.performance.count1){
-            var worker = new Worker('file:///Users/wesleyhales/phantom-test/worker.js');
+            var worker = new Worker('./worker.js');
             worker.addEventListener('message', function (event) {
                 //getting errors after 3rd thread with...
                 //_this.workerTask.callback(event);
@@ -458,17 +501,17 @@ var loadreport = {
         }
     },*/
 
-    screenshot: function(now,page){
-        var start = this.timerStart();
-        var currentTime = now - this.performance.start;
-        var ths = this;
-        if((currentTime) >= this.performance.count1){
+    screenshot: function(now, page){
+        var start = timerStart();
+        var offsetTime = now - this.performance.start;
+        // console.log(offsetTime, this.performance.planTime)
+        if((offsetTime) >= this.performance.planTime){
+            var shotPath = 'filmstrip/screenshot-' + offsetTime + '.png';
             //var ashot = page.renderBase64();
-            page.render('filmstrip/screenshot' + this.performance.timer + '.png');
-            this.performance.count2++;
-            this.performance.count1 = currentTime + (this.performance.count2 * 100);
+            page.render(shotPath);
+            this.performance.planTime += this.config.intervalTime;
             //subtract the time it took to render this image
-            this.performance.timer = this.timerEnd(start) - this.performance.count1;
+            this.performance.timer = timerEnd(start) - this.performance.planTime;
         }
     },
 
