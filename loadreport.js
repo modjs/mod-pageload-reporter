@@ -1,5 +1,6 @@
 var fs = require('fs');
 var WebPage = require('webpage');
+var netsniff = require('./netsniff');
 
 phantom.onError = function(msg, trace) {
     var msgStack = ['PHANTOM ERROR: ' + msg];
@@ -93,47 +94,10 @@ function timerEnd(start) {
 
 var loadreport = {
 
-    run: function () {
-        var cliConfig = {};
-        loadreport.performancecache = clone(loadreport.performance);
-        if (!processArgs(cliConfig, [
-            {
-                name: 'url',
-                def: 'http://google.com',
-                req: true,
-                desc: 'the URL of the site to load test'
-            }, 
-            {
-                name: 'task',
-                def: 'performance',
-                req: false,
-                desc: 'the task to perform',
-                oneof: ['performance', 'performancecache', 'filmstrip']
-            },
-            {
-                name: 'configFile',
-                def: 'config.json',
-                req: false,
-                desc: 'a local configuration file of further loadreport settings'
-            },
-            {
-                name: 'intervalTime',
-                def: 50,
-                req: false,
-                desc: 'interval time of the screenshot',
-            }
-        ])) {
-            return phantom.exit();
-        }
-        this.config = mergeConfig(cliConfig, cliConfig.configFile);
-        var task = this[this.config.task];
-        // console.log(JSON.stringify(this.config))
-        this.load(this.config, task, this);
-    },
-
     performance: {
         resources: [],
         planTime : 0,
+        lastTime: 0,
         timer : 0,
         evalConsole : {},
         evalConsoleErrors : [],
@@ -467,7 +431,7 @@ var loadreport = {
         };
 
         function doPageLoad(){
-            setTimeout(function(){page.open(config.url);}, config.cacheWait);
+            setTimeout(function(){page.open(config.url}, config.cacheWait);
         }
 
         if(config.task == 'performancecache'){
@@ -504,14 +468,15 @@ var loadreport = {
     screenshot: function(now, page){
         var start = timerStart();
         var offsetTime = now - this.performance.start;
-        // console.log(offsetTime, this.performance.planTime)
-        if((offsetTime) >= this.performance.planTime){
+        console.log(offsetTime, this.performance.planTime)
+        if( offsetTime >= this.performance.planTime ){
+            this.performance.planTime =this.performance.lastTime + this.config.intervalTime;
             var shotPath = 'filmstrip/screenshot-' + offsetTime + '.png';
             //var ashot = page.renderBase64();
             page.render(shotPath);
-            this.performance.planTime += this.config.intervalTime;
             //subtract the time it took to render this image
             this.performance.timer = timerEnd(start) - this.performance.planTime;
+            this.performance.lastTime = offsetTime;
         }
     },
 
@@ -631,4 +596,47 @@ var loadreport = {
 
 };
 
-loadreport.run();
+
+function run(options){
+    loadreport.performancecache = clone(loadreport.performance);
+    loadreport.config = mergeConfig(options, options.configFile);
+    var task = loadreport[loadreport.config.task];
+    // console.log(JSON.stringify(this.config))
+    loadreport.load(loadreport.config, task, loadreport);
+}
+
+var cliConfig = {};
+if (!processArgs(cliConfig, [
+    {
+        name: 'url',
+        def: 'http://google.com',
+        req: true,
+        desc: 'the URL of the site to load test'
+    }, 
+    {
+        name: 'task',
+        def: 'performance',
+        req: false,
+        desc: 'the task to perform',
+        oneof: ['performance', 'performancecache', 'filmstrip']
+    },
+    {
+        name: 'configFile',
+        def: 'config.json',
+        req: false,
+        desc: 'a local configuration file of further loadreport settings'
+    },
+    {
+        name: 'intervalTime',
+        def: 50,
+        req: false,
+        desc: 'interval time of the screenshot',
+    }
+])) {
+    return phantom.exit();
+}
+
+netsniff.start(cliConfig, function(){
+    run(cliConfig);
+});
+

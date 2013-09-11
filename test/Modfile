@@ -7,7 +7,7 @@ module.exports = {
     },
     tasks: {
         "mod-pageload-reporter": {
-            url: "http://www.qq.com"
+            url: "http://mu.oa.com/docs/"
         }
     }
 };
