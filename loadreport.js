@@ -35,7 +35,8 @@ function processArgs(config, contract) {
         }
         a++;
     });
-    return ok;
+    
+    if(!ok) phantom.exit();
 }
 
 function mergeConfig(config, configFile) {
@@ -287,27 +288,35 @@ var loadreport = {
     filmstrip: {
         onInitialized: function(page, config) {
             // console.log("onInitialized")
-            this.screenshot(new Date().getTime(),page);
-        },
-        onLoadStarted: function (page, config) {
-            // console.log("onLoadStarted")
             if (!this.performance.start) {
                 this.performance.start = new Date().getTime();
             }
-            this.screenshot(new Date().getTime(),page);
+        },
+        onLoadStarted: function (page, config) {
+            // console.log("onLoadStarted")
+            loadreport.screenshot(page);
         },
         onResourceRequested: function (page, config, request) {
+            if (!this.performance.start) {
+                this.performance.start = new Date().getTime();
+            }
+
             // console.log("onResourceRequested")
-            this.screenshot(new Date().getTime(),page);
+            if (!this.performance.timer) {
+                this.performance.timer = setInterval(function(){
+                    loadreport.screenshot(page);
+                }, this.config.intervalTime)
+            }
         },
+
         onResourceReceived: function (page, config, response) {
             // console.log("onResourceReceived")
-            this.screenshot(new Date().getTime(),page);
         },
 
         onLoadFinished: function (page, config, status) {
             // console.log("onLoadFinished")
-            this.screenshot(new Date().getTime(),page);
+            clearInterval(this.performance.timer);
+            loadreport.screenshot(page);
         }
     },
 
@@ -333,13 +342,13 @@ var loadreport = {
         }
     },
 
-    load: function (config, task, scope) {
-        var page = WebPage.create(),
-            pagetemp = WebPage.create(),
-            event;    
+    loadTask: function (taskName, config, scope) {
+        var task = loadreport[taskName];
+        var page = WebPage.create();
+        var pagetemp = WebPage.create();
 
         if (config.viewportSize) {
-            var size = config.viewportSize
+            var size = config.viewportSize;
             page.viewportSize = size;
             page.clipRect = { left: 0, top: 0, width: size.width, height: size.height };
         }
@@ -351,14 +360,14 @@ var loadreport = {
         if (config.customHeaders) {
             page.customHeaders = config.customHeaders;
         }
-        
+
         if (config.userAgent && config.userAgent != "default") {
             if (config.userAgentAliases[config.userAgent]) {
                 config.userAgent = config.userAgentAliases[config.userAgent];
             }
             page.settings.userAgent = config.userAgent;
         }
-        
+
         ['onInitialized', 'onLoadStarted', 'onResourceRequested', 'onResourceReceived']
             .forEach(function (event) {
             if (task[event]) {
@@ -375,20 +384,16 @@ var loadreport = {
         });
         if (task.onLoadFinished) {
             page.onLoadFinished = function (status) {
+
                 if (config.wait) {
-                    setTimeout(
-                        function () {
+                    setTimeout( function () {
                             task.onLoadFinished.call(scope, page, config, status);
-                        },
-                        config.wait
-                    );
+                        }, config.wait);
                 } else {
                     task.onLoadFinished.call(scope, page, config, status);
                 }
                 phantom.exit();
 
-                page = WebPage.create();
-                doPageLoad();
             };
         } else {
             page.onLoadFinished = function (status) {
@@ -430,54 +435,25 @@ var loadreport = {
             })
         };
 
-        function doPageLoad(){
-            setTimeout(function(){page.open(config.url}, config.cacheWait);
-        }
+        // console.log(JSON.stringify(config, undefined, 4))
 
-        if(config.task == 'performancecache'){
+        if(taskName == 'performancecache'){
             pagetemp.open(config.url,function(status) {
                 if (status === 'success') {
                     pagetemp.close();
-                    doPageLoad();
+                    setTimeout(function(){page.open(config.url)}, config.cacheWait);
                 }
             });
         }else{
-            doPageLoad();
+            page.open(config.url);
         }
     },
 
-    /*worker: function(now,page){
-        var currentTime = now - this.performance.start;
-        var ths = this;
-
-
-        if((currentTime) >= this.performance.count1){
-            var worker = new Worker('./worker.js');
-            worker.addEventListener('message', function (event) {
-                //getting errors after 3rd thread with...
-                //_this.workerTask.callback(event);
-                //mycallback(event);
-                console.log('message' + event.data);
-            }, false);
-            worker.postMessage(page);
-            this.performance.count2++;
-            this.performance.count1 = currentTime + (this.performance.count2 * 100);
-        }
-    },*/
-
-    screenshot: function(now, page){
-        var start = timerStart();
-        var offsetTime = now - this.performance.start;
-        console.log(offsetTime, this.performance.planTime)
-        if( offsetTime >= this.performance.planTime ){
-            this.performance.planTime =this.performance.lastTime + this.config.intervalTime;
-            var shotPath = 'filmstrip/screenshot-' + offsetTime + '.png';
-            //var ashot = page.renderBase64();
-            page.render(shotPath);
-            //subtract the time it took to render this image
-            this.performance.timer = timerEnd(start) - this.performance.planTime;
-            this.performance.lastTime = offsetTime;
-        }
+    screenshot: function(page){
+        var offsetTime = new Date().getTime() - this.performance.start;
+        var savePath = 'filmstrip/screenshot-' + offsetTime + '.png';
+        //var base64 = page.renderBase64();
+        page.render(savePath);
     },
 
     /**
@@ -600,13 +576,12 @@ var loadreport = {
 function run(options){
     loadreport.performancecache = clone(loadreport.performance);
     loadreport.config = mergeConfig(options, options.configFile);
-    var task = loadreport[loadreport.config.task];
     // console.log(JSON.stringify(this.config))
-    loadreport.load(loadreport.config, task, loadreport);
+    loadreport.loadTask(loadreport.config.task, loadreport.config, loadreport);
 }
 
 var cliConfig = {};
-if (!processArgs(cliConfig, [
+processArgs(cliConfig, [
     {
         name: 'url',
         def: 'http://google.com',
@@ -630,13 +605,21 @@ if (!processArgs(cliConfig, [
         name: 'intervalTime',
         def: 50,
         req: false,
-        desc: 'interval time of the screenshot',
+        desc: 'interval time of the screenshot'
     }
-])) {
-    return phantom.exit();
-}
+])
 
-netsniff.start(cliConfig, function(){
+netsniff.run(cliConfig, function(status, har){
+    if(har){
+        var harfile = './har/'+ encodeURIComponent(cliConfig.url) +'.har';
+        if(fs.exists(harfile)){
+            fs.remove(harfile);
+        }
+        var f = fs.open(harfile, "w");
+        f.writeLine(JSON.stringify(har, undefined, 4));
+        f.close();
+    }
+
     run(cliConfig);
 });
 
