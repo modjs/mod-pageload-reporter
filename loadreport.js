@@ -1,6 +1,7 @@
 var fs = require('fs');
 var WebPage = require('webpage');
 var netsniff = require('./netsniff');
+var yslow = require('./yslow');
 
 phantom.onError = function(msg, trace) {
     var msgStack = ['PHANTOM ERROR: ' + msg];
@@ -601,6 +602,11 @@ processArgs(cliConfig, [
         req: false,
         desc: 'a local configuration file of further loadreport settings'
     },
+	{
+        name: 'dirname',
+        req: false,
+        desc: 'the name of the directory that the currently executing script resides in'
+    },
     {
         name: 'intervalTime',
         def: 50,
@@ -619,7 +625,10 @@ netsniff.run(cliConfig, function(status, har){
         f.writeLine(JSON.stringify(har, undefined, 4));
         f.close();
     }
+	
+	yslow.run(cliConfig, function(){
+	    run(cliConfig);
+	});
 
-    run(cliConfig);
 });
 

@@ -20,11 +20,12 @@ exports.run = function (options, done) {
     var url = options.url;
     var task = options.task;
     var config = options.config;
+	debugger;
     var phantomjs = exports.loadTask('mod-phantomjs');
     var path = require('path');
     
     phantomjs.run({
         script: path.join(__dirname, "loadreport.js"),
-        args: [url, task, config || path.join(__dirname, "config.json")]
+        args: [url, task, config || path.join(__dirname, "config.json"), __dirname]
     }, done);
 };
