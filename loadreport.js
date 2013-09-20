@@ -15,30 +15,6 @@ phantom.onError = function(msg, trace) {
     phantom.exit(1);
 };
 
-function processArgs(config, contract) {
-    var a = 0;
-    var ok = true;
-
-    contract.forEach(function(argument) {
-        if (a < phantom.args.length) {
-            config[argument.name] = phantom.args[a];
-        } else {
-            if (argument.req) {
-                console.log('"' + argument.name + '" argument is required. This ' + argument.desc + '.');
-                ok = false;
-            } else {
-                config[argument.name] = argument.def;
-            }
-        }
-        if (argument.oneof && argument.oneof.indexOf(config[argument.name])==-1) {
-            console.log('"' + argument.name + '" argument must be one of: ' + argument.oneof.join(', '));
-            ok = false;
-        }
-        a++;
-    });
-    
-    if(!ok) phantom.exit();
-}
 
 function mergeConfig(config, configFile) {
     if (!fs.exists(configFile)) {
@@ -195,7 +171,7 @@ var loadreport = {
                 });
             }
         },
-        onLoadFinished: function (page, config, status) {
+        onLoadFinished: function (page, config, status, done) {
             var start = this.performance.start,
                 finish =  new Date().getTime(),
                 resources = this.performance.resources,
@@ -240,7 +216,7 @@ var loadreport = {
             }
 
             var report = {};
-            report.url = phantom.args[0];
+            report.url = config.url;
             report.phantomCacheEnabled = phantom.args.indexOf('yes') >= 0 ? 'yes' : 'no';
             report.taskName = config.task;
             var drsi = parseInt(this.performance.evalConsole.interactive);
@@ -269,21 +245,25 @@ var loadreport = {
             //console.log(JSON.stringify(report));
             console.log('Elapsed load time: ' + pad(elapsed, 6) + 'ms');
 
-            if(phantom.args.indexOf('csv') >= 0){
-                this.printToFile(config,report,'loadreport','csv',phantom.args.indexOf('wipe') >= 0);
-            }
+            this.printToFile(report, config);
 
-            if(phantom.args.indexOf('json') >= 0){
-                this.printToFile(config,report,'loadreport','json',phantom.args.indexOf('wipe') >= 0);
-            }
 
-            if(phantom.args.indexOf('junit') >= 0){
-                this.printToFile(config,report,'loadreport','xml',phantom.args.indexOf('wipe') >= 0);
-            }
+            // page.evaluate(function () {
+            //     /* scale the whole body */
+            //     document.body.style.webkitTransform = "scale(2)";
+            //     document.body.style.webkitTransformOrigin = "0% 0%";
+            //     /* fix the body width that overflows out of the viewport */
+            //     document.body.style.width = "50%";
+            // });
 
+
+           // setTimeout(function () {
+                page.render('./screenshot/' + encodeURIComponent(config.url) + '.png');
+            //}, 200);
+            
+
+            done(report);
         }
-
-
     },
 
     filmstrip: {
@@ -318,6 +298,7 @@ var loadreport = {
             // console.log("onLoadFinished")
             clearInterval(this.performance.timer);
             loadreport.screenshot(page);
+            phantom.exit();
         }
     },
 
@@ -325,6 +306,17 @@ var loadreport = {
         return page.evaluate(function () {
             return document.location.toString();
         });
+    },
+	
+	
+	screenshot: function(page){
+        var offsetTime = new Date().getTime() - this.performance.start;
+        var savePath = 'filmstrip/screenshot-' + offsetTime + '.png';
+		var curScreenshot = page.renderBase64();
+		if(curScreenshot != this.preScreenshot){
+			page.render(savePath);
+		}
+		this.preScreenshot = curScreenshot;
     },
 
     emitConfig: function (config, prefix) {
@@ -343,16 +335,22 @@ var loadreport = {
         }
     },
 
-    loadTask: function (taskName, config, scope) {
+    loadTask: function (taskName, config, scope, done) {
         var task = loadreport[taskName];
         var page = WebPage.create();
-        var pagetemp = WebPage.create();
+
+        // console.log(JSON.stringify(config))
 
         if (config.viewportSize) {
+
             var size = config.viewportSize;
             page.viewportSize = size;
             page.clipRect = { left: 0, top: 0, width: size.width, height: size.height };
         }
+
+        // if (config.retina) {
+        //     page.zoomFactor = 0.5;
+        // }
         
         if (config.cookie){
             page.addCookie(config.cookie);
@@ -383,28 +381,23 @@ var loadreport = {
 
             }
         });
-        if (task.onLoadFinished) {
-            page.onLoadFinished = function (status) {
 
-                if (config.wait) {
-                    setTimeout( function () {
-                            task.onLoadFinished.call(scope, page, config, status);
-                        }, config.wait);
-                } else {
-                    task.onLoadFinished.call(scope, page, config, status);
-                }
-                phantom.exit();
+        page.onLoadFinished = function (status) {
+            if (config.wait) {
+                setTimeout( function () {
+                        task.onLoadFinished.call(scope, page, config, status, done);
+                }, config.wait);
+            } else {
+                task.onLoadFinished.call(scope, page, config, status, done);
+            }
+        };
 
-            };
-        } else {
-            page.onLoadFinished = function (status) {
-                phantom.exit();
-            };
-        }
         page.settings.localToRemoteUrlAccessEnabled = true;
         page.settings.webSecurityEnabled = false;
         page.onConsoleMessage = function (msg, lineNum, sourceId) {
+
             console.log('CONSOLE: ' + msg);
+
             if (msg.indexOf('jserror-') >= 0){
                 loadreport.performance.evalConsoleErrors.push(msg.substring('jserror-'.length,msg.length));
             }else{
@@ -439,6 +432,7 @@ var loadreport = {
         // console.log(JSON.stringify(config, undefined, 4))
 
         if(taskName == 'performancecache'){
+            var pagetemp = WebPage.create();
             pagetemp.open(config.url,function(status) {
                 if (status === 'success') {
                     pagetemp.close();
@@ -448,13 +442,6 @@ var loadreport = {
         }else{
             page.open(config.url);
         }
-    },
-
-    screenshot: function(page){
-        var offsetTime = new Date().getTime() - this.performance.start;
-        var savePath = 'filmstrip/screenshot-' + offsetTime + '.png';
-        //var base64 = page.renderBase64();
-        page.render(savePath);
     },
 
     /**
@@ -499,86 +486,68 @@ var loadreport = {
         return junit.join('\n');
     },
 
-    printToFile: function(config,report,filename,extension,createNew) {
-        var f, myfile,
-            keys = [], values = [];
-        for(var key in report)
-        {
-            if(report.hasOwnProperty(key))
-            {
+    printToFile: function(report, config) {
+        var keys = [], values = [];
+
+        for(var key in report) {
+            if(report.hasOwnProperty(key)) {
                 keys.push(key);
                 values.push(report[key]);
             }
         }
-        if(phantom.args[3] && phantom.args[3] != 'wipe'){
-            myfile = 'reports/' + filename + '-' + phantom.args[3] + '.' + extension;
-        }else{
-            myfile = 'reports/' + filename + '.' + extension;
 
+        var myfile = './performance/' + encodeURIComponent(config.url) + '.' + config.format;
+
+        if(fs.exists(myfile)) {
+            fs.remove(myfile);
         }
 
-        if(!createNew && fs.exists(myfile)){
-            //file exists so append line
-            try{
-                switch (extension) {
-                    case 'json':
-                        var phantomLog = [];
-                        var tempLine = JSON.parse(fs.read(myfile));
-                        if(Object.prototype.toString.call( tempLine ) === '[object Array]'){
-                            phantomLog = tempLine;
-                        }
-                        phantomLog.push(report);
-                        fs.remove(myfile);
-                        f = fs.open(myfile, "w");
-                        f.writeLine(JSON.stringify(phantomLog));
-                        f.close();
-                        break;
-                    case 'xml':
-                        console.log("cannot append report to xml file");
-                        break;
-                    default:
-                        f = fs.open(myfile, "a");
-                        f.writeLine(values);
-                        f.close();
-                        break;
-                }
-            } catch (e) {
-                console.log("problem appending to file",e);
-            }
-        }else{
-            if(fs.exists(myfile)){
-                fs.remove(myfile);
-            }
-            //write the headers and first line
-            try {
-                f = fs.open(myfile, "w");
-                switch (extension) {
-                    case 'json':
-                        f.writeLine(JSON.stringify(report));
-                        break;
-                    case 'xml':
-                        f.writeLine(this.formatAsJUnit(keys, values));
-                        break;
-                    default:
-                        f.writeLine(keys);
-                        f.writeLine(values);
-                        break;
-                }
-                f.close();
-            } catch (e) {
-                console.log("problem writing to file",e);
-            }
+        //write the headers and first line
+        var f = fs.open(myfile, "w");
+        switch (config.format) {
+            case 'json':
+                f.writeLine(JSON.stringify(report, undefined, 4));
+                break;
+            case 'xml':
+                f.writeLine(this.formatAsJUnit(keys, values));
+                break;
+            default:
+                f.writeLine(keys);
+                f.writeLine(values);
+                break;
         }
+
+        f.close();
     }
 
 };
 
 
-function run(options){
-    loadreport.performancecache = clone(loadreport.performance);
-    loadreport.config = mergeConfig(options, options.configFile);
-    // console.log(JSON.stringify(this.config))
-    loadreport.loadTask(loadreport.config.task, loadreport.config, loadreport);
+
+function processArgs(config, contract) {
+    var a = 0;
+    var ok = true;
+
+    contract.forEach(function(argument) {
+        if (a < phantom.args.length) {
+            config[argument.name] = phantom.args[a];
+        } else {
+            if (argument.req) {
+                console.log('"' + argument.name + '" argument is required. This ' + argument.desc + '.');
+                ok = false;
+            } else {
+                config[argument.name] = argument.def;
+            }
+        }
+        // console.log(JSON.stringify(argument), config[argument.name], typeof config[argument.name])
+        if (argument.oneof && argument.oneof.indexOf( config[argument.name] ) == -1) {
+            console.log('"' + argument.name + '" argument must be one of: ' + argument.oneof.join(', '));
+            ok = false;
+        }
+        a++;
+    });
+    
+    if(!ok) phantom.exit();
 }
 
 var cliConfig = {};
@@ -589,13 +558,6 @@ processArgs(cliConfig, [
         req: true,
         desc: 'the URL of the site to load test'
     }, 
-    {
-        name: 'task',
-        def: 'performance',
-        req: false,
-        desc: 'the task to perform',
-        oneof: ['performance', 'performancecache', 'filmstrip']
-    },
     {
         name: 'configFile',
         def: 'config.json',
@@ -608,14 +570,38 @@ processArgs(cliConfig, [
         desc: 'the name of the directory that the currently executing script resides in'
     },
     {
+        name: 'task',
+        def: 'performance',
+        req: false,
+        desc: 'the task to perform',
+        oneof: ['performance', 'performancecache', 'filmstrip']
+    },
+    {
         name: 'intervalTime',
         def: 50,
         req: false,
         desc: 'interval time of the screenshot'
+    },
+    {
+        name: 'format',
+        def: 'json',
+        req: false,
+        desc: 'output format'
     }
 ])
 
+
+function run(options, done){
+    loadreport.performancecache = clone(loadreport.performance);
+    loadreport.config = mergeConfig(options, options.configFile);
+    // console.log(JSON.stringify(this.config))
+    loadreport.loadTask(loadreport.config.task, loadreport.config, loadreport, done);
+}
+
+
 netsniff.run(cliConfig, function(status, har){
+
+
     if(har){
         var harfile = './har/'+ encodeURIComponent(cliConfig.url) +'.har';
         if(fs.exists(harfile)){
@@ -626,9 +612,27 @@ netsniff.run(cliConfig, function(status, har){
         f.close();
     }
 	
-	yslow.run(cliConfig, function(){
-	    run(cliConfig);
+	yslow.run(cliConfig, function(yslowResult){
+
+	    run(cliConfig, function(perfResult){
+
+            var report = {
+                har: har,
+                yslow: yslowResult,
+                perf: perfResult
+            };
+
+            var reportfile = './report/'+ encodeURIComponent(cliConfig.url) +'.json';
+            if(fs.exists(reportfile)){
+                fs.remove(reportfile);
+            }
+            var f = fs.open(reportfile, "w");
+            f.writeLine(JSON.stringify(report, undefined, 4));
+            f.close();
+
+            phantom.exit();
+
+        });
 	});
 
 });
-

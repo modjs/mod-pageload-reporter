@@ -194,9 +194,9 @@ exports.run = function (options, done){
                             ysutil = ys.util,
 
                             // format out with appropriate content type
-                            formatOutput = function (content) {
-                                var format = (args.format || '').toLowerCase(),
-                                    harness = {
+                            formatOutput = function (content, format) {
+                                format = format || (args.format || '').toLowerCase();
+                                var harness = {
                                         'tap': {
                                             func: ysutil.formatAsTAP,
                                             contentType: 'text/plain'
@@ -299,42 +299,17 @@ exports.run = function (options, done){
                             results.dictionary = ysutil.getDict(args.info,
                                 args.ruleset);
                         }
+
+                        // output = {};
+                        // ['json', 'tap'].forEach(function(format){
+                        //     output[format]  = formatOutput(results, format);
+                        // })
+
                         output = formatOutput(results);
 
-                        // send beacon
-                        if (args.beacon) {
-                            try {
-                                xhr = new XMLHttpRequest();
-                                xhr.onreadystatechange = function () {
-                                    // in verbose mode, include
-                                    // beacon response info
-                                    if (xhr.readyState === 4 && args.verbose) {
-                                        results.beacon = {
-                                            status: xhr.status,
-                                            headers: formatHeaders(
-                                                xhr.getAllResponseHeaders()
-                                            ),
-                                            body: xhr.responseText
-                                        };
-                                        output = formatOutput(results);
-                                    }
-                                };
-                                xhr.open('POST', args.beacon, false);
-                                xhr.setRequestHeader('Content-Type',
-                                    output.contentType);
-                                xhr.send(output.content);
-                            } catch (xhrerr) {
-                                // include error on beacon
-                                if (args.verbose) {
-                                    results.beacon = {
-                                        error: xhrerr
-                                    };
-                                    output = formatOutput(results);
-                                }
-                            }
-                        }
-
+                        // return JSON.stringify(output);
                         return output.content;
+
                     } catch (err) {
                         return err;
                     }
@@ -361,17 +336,17 @@ exports.run = function (options, done){
 			if(typeof res === 'string'){
 				res = JSON.parse(res)
 			}
-			var harfile = './yslow/'+ encodeURIComponent(cliConfig.url) +'.json';
-			if(fs.exists(harfile)){
-				fs.remove(harfile);
+			var yslowJSONReport = './yslow/'+ encodeURIComponent(cliConfig.url) +'.json';
+			if(fs.exists(yslowJSONReport)){
+				fs.remove(yslowJSONReport);
 			}
-			var f = fs.open(harfile, "w");
+			var f = fs.open(yslowJSONReport, "w");
 			f.writeLine(JSON.stringify(res, undefined, 4));
 			f.close();
         }
 
         // finish yslow
-        done();
+        done(res);
     });
 	
 };

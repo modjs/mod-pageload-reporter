@@ -7,7 +7,6 @@ exports.options = {
         describe : 'the URL of the destination site to load test'
     },
     "task": {
-        default: "filmstrip",
         describe: "the task to perform"
     },
     
@@ -26,6 +25,6 @@ exports.run = function (options, done) {
     
     phantomjs.run({
         script: path.join(__dirname, "loadreport.js"),
-        args: [url, task, config || path.join(__dirname, "config.json"), __dirname]
+        args: [url, config || path.join(__dirname, "config.json"), __dirname, task || '']
     }, done);
 };

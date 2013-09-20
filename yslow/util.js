@@ -1474,6 +1474,64 @@ YSLOW.util = {
     },
 
     /**
+     * Format test results as HTML
+     * @param {Array} tests the arrays containing the test results from testResults.
+     * @return {String} the results as TAP plain text
+     */
+    formatAsHTML: function (results) {
+        var i, res, line, offenders, j, lenJ,
+            len = results.length,
+            html = [],
+            util = YSLOW.util,
+            decodeURI = util.decodeURIComponent;
+
+        // test plan
+        html.push('1..' + len);
+
+        for (i = 0; i < len; i += 1) {
+            res = results[i];
+            line = res.ok || res.score < 0 ? 'ok' : 'not ok';
+            line += ' ' + (i + 1) + ' ' + res.grade +
+                ' (' + res.score + ') ' + res.name;
+            if (res.description) {
+                line += ': ' + res.description;
+            }
+            if (res.score < 0) {
+                line += ' # SKIP score N/A';
+            }
+            html.push(line);
+
+            // message
+            if (res.message) {
+                html.push('  ---');
+                html.push('  message: ' + res.message);
+            }
+
+            // offenders
+            offenders = res.offenders;
+            if (offenders) {
+                lenJ = offenders.length;
+                if (lenJ > 0) {
+                    if (!res.message) {
+                        html.push('  ---');
+                    }
+                    html.push('  offenders:');
+                    for (j = 0; j < lenJ; j += 1) {
+                        html.push('    - "' +
+                            decodeURI(offenders[j]) + '"');
+                    }
+                }
+            }
+
+            if (res.message || lenJ > 0) {
+                html.push('  ...');
+            }
+        }
+
+        return html.join('\n');
+    },
+
+    /**
      * Format test results as JUnit XML for CI
      * @see: http://www.junit.org/
      * @param {Array} tests the arrays containing the test results from testResults.

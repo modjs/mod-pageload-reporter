@@ -7,7 +7,7 @@ module.exports = {
     },
     tasks: {
         "mod-pageload-reporter": {
-            url: "http://google.com"
+            url: "http://web.p.qq.com/qqmpmobile/movie/list.html"
         }
     }
 };
